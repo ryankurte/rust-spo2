@@ -26,7 +26,11 @@ async fn main() {
     let cfg = Config::from_args();
 
     // Setup application logging
-    let log_cfg = ConfigBuilder::new().build();
+    let log_cfg = ConfigBuilder::new()
+        .add_filter_ignore_str("serde_xml_rs")
+        //.add_filter_ignore_str("bluez_async")
+        .add_filter_ignore_str("mio")
+        .build();
     let _logger = TermLogger::init(cfg.log_level, log_cfg, TerminalMode::Mixed, ColorChoice::Auto);
 
     // Connect to sensor
