@@ -26,7 +26,7 @@ pub struct Options {
     pub local_name: String,
 
     /// Timeout for search operation
-    #[structopt(long, default_value="20s")]
+    #[structopt(long, default_value="10s")]
     pub search_timeout: humantime::Duration,
 }
 
@@ -83,7 +83,7 @@ impl Sensor {
         while now.elapsed() < *opts.search_timeout {
 
             // Wait for incoming events
-            let evt = match tokio::time::timeout(Duration::from_millis(500), events.next() ).await {
+            let evt = match tokio::time::timeout(Duration::from_millis(100), events.next() ).await {
                 Ok(Some(e)) => e,
                 // TODO: separate BLE errors from timeout
                 _ => continue,
@@ -114,6 +114,7 @@ impl Sensor {
                         Some(l) if l.starts_with(&opts.local_name) => {
                             info!("Matching device!: {:?}", props);
 
+                            #[cfg(nope)]
                             if !periph.is_connected().await? {
                                 periph.connect().await?;
                             } else {
@@ -122,6 +123,8 @@ impl Sensor {
 
                             device = Some((periph, props));
                             pid = Some(id.clone());
+
+                            break;
                         },
                         _ => (),
                     }
@@ -155,7 +158,7 @@ impl Sensor {
         drop(events);
 
         // Stop scanning
-        //central.stop_scan().await?;
+        central.stop_scan().await?;
 
         #[cfg(nope)]
         let (device, props) = match &pid {
