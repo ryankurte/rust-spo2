@@ -1,6 +1,7 @@
 
 use std::time::{Duration, Instant};
 
+use bluer::AdapterEvent;
 use futures::stream::StreamExt;
 use log::{trace, debug, info, error};
 
@@ -32,8 +33,11 @@ pub struct Options {
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    #[error("Bluetooth: {0}")]
+    #[error("Btleplug: {0}")]
     Ble(btleplug::Error),
+
+    #[error("Bluer: {0}")]
+    Bluer(bluer::Error),
 
     #[error("No matching adaptor for index {0}")]
     NoMatchingAdaptor(usize),
@@ -54,7 +58,66 @@ impl From<btleplug::Error> for Error {
     }
 }
 
+impl From<bluer::Error> for Error {
+    fn from(e: bluer::Error) -> Self {
+        Error::Bluer(e)
+    }
+}
+
 impl Sensor {
+    pub async fn connect(opts: Options) -> Result<Self, Error> {
+
+        // Create bluez session
+        let session = bluer::Session::new().await?;
+
+        // Connect to default adaptor
+        let adapter = session.default_adapter().await?;
+
+        // Start device discovery
+        let mut events = adapter.discover_devices().await?;
+
+        let now = Instant::now();
+        while now.elapsed() < *opts.search_timeout {
+
+            // Wait for incoming events
+            let evt = match tokio::time::timeout(Duration::from_millis(100), events.next() ).await {
+                Ok(Some(e)) => e,
+                // TODO: separate BLE errors from timeout
+                _ => continue,
+            };
+
+            match evt {
+                AdapterEvent::DeviceAdded(addr) => {
+                    trace!("Device added: {:?}", addr);
+
+                    let mut device = adapter.device(addr)?;
+
+                    let name = device.name().await?;
+                    match name {
+                        Some(name) if name.starts_with(&opts.local_name) => {
+                            info!("Matching device!: {:?}", device);
+
+                            device = adapter.connect_device(addr, bluer::AddressType::LeRandom).await?;
+
+                            info!("Device connected!");
+
+                            let services = device.services().await?;
+
+                            info!("Services: {:?}", services);
+
+                        },
+                        _ => (),
+                    }
+                },
+                _ => debug!("Event: {:?}", evt),
+            }
+        }
+
+
+        todo!()
+    }
+
+    #[cfg(nope)]
     pub async fn connect(opts: Options) -> Result<Self, Error> {
 
         // Connect to BLE manager
@@ -75,6 +138,8 @@ impl Sensor {
         // Start scanning
         debug!("Starting scan for BLE devices");
         central.start_scan(ScanFilter::default()).await?;
+
+        tokio::time::sleep(Duration::from_millis(1000)).await;
 
         let mut device = None;
         let mut pid = None;
@@ -193,6 +258,7 @@ impl Sensor {
         debug!("Discovering services");
 
         device.discover_services().await?;
+        #[cfg(nope)]
         if device.services().is_empty() {
             return Err(Error::NoServicesFound)
         }
@@ -203,6 +269,10 @@ impl Sensor {
             for char in service.characteristics {
                 debug!("  - {:?}", char);
             }
+        }
+
+        for char in device.characteristics() {
+            debug!("Characteristic: {:?}", char);
         }
 
         // TODO: start listener task, subscribe to notifications? though this could also be part of Sensor API
